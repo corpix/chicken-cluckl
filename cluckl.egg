@@ -1,0 +1,12 @@
+;; -*- scheme -*-
+
+((author "Dmitry Moskowski")
+ (synopsis "Networked REPL over TCP")
+ (license "BSD")
+ (test-dependencies test)
+ (dependencies srfi-18 breadline pathname-expand)
+ (category debugging)
+ (components
+  (extension nrepl
+	     (source "cluckl-module.scm")
+             (source-dependencies "cluckl.scm"))))

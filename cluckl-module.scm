@@ -1,0 +1,6 @@
+(module cluckl (cluckl cluckl-loop cluckl-prompt)
+(import (scheme)
+	(chicken base)
+	(chicken condition)
+	(chicken process-context))
+(include "cluckl.scm"))
