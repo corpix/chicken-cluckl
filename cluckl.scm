@@ -17,7 +17,6 @@
 	(only (breadline)
 	      readline
 	      insert-text
-	      redisplay
 	      history-file
 	      read-history!
 	      add-history!
@@ -41,7 +40,7 @@
 (define current-cluckl-host (make-parameter "127.0.0.1"))
 (define current-cluckl-backlog (make-parameter 16))
 (define current-cluckl-prompt (make-parameter " λ > "))
-(define current-cluckl-debug (make-parameter #t))
+(define current-cluckl-debug (make-parameter #f))
 
 (define process-error-port (current-error-port))
 
@@ -55,6 +54,9 @@
   (when (current-cluckl-debug)
     (display message process-error-port)
     (newline process-error-port)))
+
+(define (cluckl-debug)
+  (current-cluckl-debug (not (current-cluckl-debug))))
 
 (define (cluckl-message-get key message #!optional (default #f))
   (let ((pair (or (assq key message) default)))
@@ -72,6 +74,9 @@
 
 (define (cluckl-message-get-error message)
   (cluckl-message-get 'error message))
+
+(define (cluckl-message-get-callchain message)
+  (cluckl-message-get 'callchain message))
 
 (define (cluckl-message-get-output message)
   (cluckl-message-get 'output message))
@@ -140,14 +145,20 @@
     ((#f) (cluckl-protocol-error (format "missing required 'op key in message ~a" message)))
     (else (cluckl-protocol-error (format "unsupported 'op ~a" op)))))
 
+(define (cluckl-display-exception exn
+				  #!optional
+				  (message-port (current-output-port))
+				  (call-chain-port (current-output-port)))
+  (print-error-message exn message-port)
+  ;; TODO: how many levels should we remove to hide repl internals?
+  (print-call-chain call-chain-port 0))
+
 (define (cluckl-handle-exception exn)
   (let ((message (open-output-string))
 	(call-chain (open-output-string)))
-    (print-error-message exn message)
-    ;; TODO: how much levels should we remove to hide repl internals?
-    (print-call-chain call-chain 0)
-    (cluckl-write-error (get-output-string message)
-			(get-output-string call-chain))))
+    (cluckl-display-exception exn message call-chain)
+    (cluckl-write-error (string-trim (get-output-string message))
+			(string-trim (get-output-string call-chain)))))
 
 ;;
 
@@ -198,6 +209,7 @@
 (define (cluckl-connect #!key
 			(port (current-cluckl-port))
 			(host (current-cluckl-host)))
+  (define no-value (gensym))
   (define history (pathname-expand (history-file)))
   (when (file-exists? history)
     (read-history! history))
@@ -214,8 +226,14 @@
 	 (else
 	  (add-history! body)
 	  (write-history! history)
-	  (cluckl-write-eval (read (open-input-string body)) port)
-	  (flush-output port))))))
+	  (let ((expr (handle-exceptions exn
+			(begin0 no-value
+			  (cluckl-display-exception exn)
+			  (mutex-unlock! waiting))
+			(read (open-input-string body)))))
+	    (unless (eq? expr no-value)
+	      (cluckl-write-eval expr port)
+	      (flush-output port))))))))
   (define (show value)
     (display value)
     (newline)
@@ -231,7 +249,7 @@
 		 (output (cluckl-message-get-output message)))
 	     (cond
 	      (result (show result))
-	      (error (show error))
+	      (error (show error) (show (cluckl-message-get-callchain message)))
 	      (output (show output)))
 	     (when (or result error)
 	       (mutex-unlock! waiting)))
@@ -240,6 +258,3 @@
       (and (prompt out)
 	   (loop)))
     (write-history! history)))
-
-;; (define (cluckl)
-;;   (cluckl-spawn (current-input-port) (current-output-port)))
